@@ -1,0 +1,128 @@
+package asynchronous
+
+import akka.actor.Actor.Receive
+import akka.actor.{Actor, ActorRef, ActorSystem, Props}
+import asynchronous.FactorialsActor.{ComputationWasFinished, Computed, Run}
+import asynchronous.Worker.Compute
+import org.scalatest.FreeSpec
+import akka.pattern.ask
+import akka.util.Timeout
+
+import scala.concurrent.Future
+
+class FutureVsActorSpec extends FreeSpec {
+
+  val tens = (1 to 1000000).map {
+    _ => 10L
+  }.toSeq
+
+
+  "Future should be" - {
+    "Faster than Actor workers" in {
+
+
+      implicit val actorSystem = ActorSystem("gogoActors", None, None, defaultExecutionContext = Some(ec))
+
+      futureFactorials
+      actorFactorials
+
+
+      Thread.sleep(6000000)
+    }
+  }
+
+  implicit val ec = scala.concurrent.ExecutionContext.Implicits.global
+
+  private def futureFactorials = {
+    val start = System.currentTimeMillis()
+    val futures = tens.zipWithIndex.map { case (x, i) =>
+      Future {
+        FactorialHelper.factorial(x)
+      }.map { y =>
+        println(s"FUTURE $i is finished, factorial = $y")
+      }
+    }
+
+    Future.sequence(futures).map{ _ =>
+      println(s"Futures computation has finished in ${System.currentTimeMillis - start}")
+    }
+  }
+
+  private def actorFactorials(implicit actorSystem: ActorSystem) = {
+    import scala.concurrent.duration._
+
+    val runner = actorSystem.actorOf(FactorialsActor.props(tens))
+    val start = System.currentTimeMillis()
+    implicit val timeout = Timeout(6000 seconds)
+    val f = (runner ? Run).mapTo[FactorialsActor.ComputationWasFinished].map{x =>
+      val y = 3
+      x
+    }
+    f.map { x =>
+      val y = x
+      println(s"Actors computation has finished in ${System.currentTimeMillis - start}")
+    }
+  }
+
+
+}
+
+object FactorialHelper {
+  def factorial(n: Long): Long = {
+    n match {
+      case 0 => 1
+      case _ => n * factorial(n - 1)
+    }
+  }
+}
+
+class FactorialsActor(args: Seq[Long]) extends Actor {
+  var computedFactorials = 0
+
+  override def receive: Receive = {
+    case Run =>
+      args.zipWithIndex.foreach { case (x, i) =>
+        context.actorOf(Worker.props(x, i)) ! Compute
+      }
+      context become waitingForResult(sender)
+
+
+  }
+
+  private def waitingForResult(origSender: ActorRef): Receive = {
+    case Computed(index) =>
+      computedFactorials = computedFactorials + 1
+      if (computedFactorials == args.size)
+        origSender ! ComputationWasFinished(computedFactorials)
+
+  }
+}
+
+object FactorialsActor {
+  def props(args: Seq[Long]) = Props(new FactorialsActor(args))
+
+  case class Computed(index: Int)
+
+  case object Run
+
+  case class ComputationWasFinished(amount: Int)
+
+}
+
+
+class Worker(argument: Long, index: Int) extends Actor {
+
+
+  override def receive: Receive = {
+    case Compute =>
+      val result = FactorialHelper.factorial(argument)
+      sender ! Computed(index)
+  }
+}
+
+object Worker {
+
+  case object Compute
+
+  def props(argument: Long, index: Int) = Props(new Worker(argument, index))
+}
