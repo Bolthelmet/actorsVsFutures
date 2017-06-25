@@ -54,12 +54,8 @@ class FutureVsActorSpec extends FreeSpec {
     val runner = actorSystem.actorOf(FactorialsActor.props(tens))
     val start = System.currentTimeMillis()
     implicit val timeout = Timeout(6000 seconds)
-    val f = (runner ? Run).mapTo[FactorialsActor.ComputationWasFinished].map{x =>
-      val y = 3
-      x
-    }
+    val f = (runner ? Run).mapTo[FactorialsActor.ComputationWasFinished]
     f.map { x =>
-      val y = x
       println(s"Actors computation has finished in ${System.currentTimeMillis - start}")
     }
   }
